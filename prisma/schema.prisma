@@ -1,0 +1,209 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MembershipRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum Plan {
+  FREE
+  PRO
+  ENTERPRISE
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELED
+  PAST_DUE
+  TRIALING
+  INCOMPLETE
+}
+
+enum DataSourceType {
+  CSV
+  MANUAL
+  REST_API
+}
+
+enum WidgetType {
+  LINE_CHART
+  BAR_CHART
+  PIE_CHART
+  STAT_CARD
+  TABLE
+}
+
+enum AlertCondition {
+  ABOVE
+  BELOW
+  EQUALS
+}
+
+model User {
+  id        String   @id @default(cuid())
+  clerkId   String   @unique
+  email     String   @unique
+  name      String?
+  imageUrl  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships Membership[]
+  apiKeys     ApiKey[]
+  alerts      Alert[]
+}
+
+model Organisation {
+  id               String   @id @default(cuid())
+  name             String
+  slug             String   @unique
+  clerkOrgId       String?  @unique
+  onboardingStep   Int      @default(0)
+  onboardingDone   Boolean  @default(false)
+  selectedKpis     String[] @default([])
+  pendingInvites   String[] @default([])
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  memberships  Membership[]
+  dataSources  DataSource[]
+  dashboards   Dashboard[]
+  alerts       Alert[]
+  subscription Subscription?
+  apiKeys      ApiKey[]
+}
+
+model Membership {
+  id             String         @id @default(cuid())
+  role           MembershipRole @default(MEMBER)
+  userId         String
+  organisationId String
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organisationId])
+  @@index([organisationId])
+}
+
+model DataSource {
+  id             String         @id @default(cuid())
+  name           String
+  type           DataSourceType
+  config         Json           @default("{}")
+  organisationId String
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  rows         DataRow[]
+  widgets      Widget[]
+
+  @@index([organisationId])
+}
+
+model DataRow {
+  id           String   @id @default(cuid())
+  data         Json
+  dataSourceId String
+  createdAt    DateTime @default(now())
+
+  dataSource DataSource @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+
+  @@index([dataSourceId])
+}
+
+model Dashboard {
+  id             String   @id @default(cuid())
+  name           String   @default("Main Dashboard")
+  organisationId String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  widgets      Widget[]
+
+  @@index([organisationId])
+}
+
+model Widget {
+  id           String     @id @default(cuid())
+  title        String
+  type         WidgetType
+  config       Json       @default("{}")
+  x            Int        @default(0)
+  y            Int        @default(0)
+  w            Int        @default(4)
+  h            Int        @default(3)
+  dashboardId  String
+  dataSourceId String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  dashboard  Dashboard   @relation(fields: [dashboardId], references: [id], onDelete: Cascade)
+  dataSource DataSource? @relation(fields: [dataSourceId], references: [id], onDelete: SetNull)
+
+  @@index([dashboardId])
+}
+
+model Alert {
+  id             String         @id @default(cuid())
+  name           String
+  metric         String
+  condition      AlertCondition
+  threshold      Float
+  email          String
+  isActive       Boolean        @default(true)
+  lastTriggered  DateTime?
+  organisationId String
+  userId         String
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([organisationId])
+  @@index([isActive])
+}
+
+model Subscription {
+  id                   String             @id @default(cuid())
+  plan                 Plan               @default(FREE)
+  status               SubscriptionStatus @default(ACTIVE)
+  stripeCustomerId     String?            @unique
+  stripeSubscriptionId String?            @unique
+  stripePriceId        String?
+  currentPeriodEnd     DateTime?
+  organisationId       String             @unique
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+}
+
+model ApiKey {
+  id             String    @id @default(cuid())
+  name           String
+  keyHash        String    @unique
+  keyPrefix      String
+  lastUsedAt     DateTime?
+  organisationId String
+  userId         String
+  createdAt      DateTime  @default(now())
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([organisationId])
+}
