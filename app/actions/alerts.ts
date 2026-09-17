@@ -6,6 +6,18 @@ import { requireTenant } from "@/lib/auth";
 import type { AlertCondition } from "@/types";
 
 const VALID_CONDITIONS: AlertCondition[] = ["ABOVE", "BELOW", "EQUALS"];
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function isAllowedAlertEmail(
+  email: string,
+  tenantEmail: string,
+  memberEmails: string[]
+): boolean {
+  const normalized = email.trim().toLowerCase();
+  if (!EMAIL_RE.test(normalized)) return false;
+  if (normalized === tenantEmail.toLowerCase()) return true;
+  return memberEmails.some((e) => e.toLowerCase() === normalized);
+}
 
 export async function createAlert(input: {
   name: string;
@@ -26,13 +38,27 @@ export async function createAlert(input: {
     return { ok: false as const, error: "Threshold must be a number." };
   }
 
+  const members = await prisma.membership.findMany({
+    where: { organisationId: tenant.organisationId },
+    include: { user: { select: { email: true } } },
+  });
+  const memberEmails = members.map((m) => m.user.email);
+  const email = (input.email.trim() || tenant.email).toLowerCase();
+
+  if (!isAllowedAlertEmail(email, tenant.email, memberEmails)) {
+    return {
+      ok: false as const,
+      error: "Alert email must belong to a workspace member.",
+    };
+  }
+
   await prisma.alert.create({
     data: {
-      name: input.name.trim(),
-      metric: input.metric.trim(),
+      name: input.name.trim().slice(0, 120),
+      metric: input.metric.trim().slice(0, 120),
       condition: input.condition,
       threshold: input.threshold,
-      email: input.email.trim() || tenant.email,
+      email,
       organisationId: tenant.organisationId,
       userId: tenant.userId,
     },

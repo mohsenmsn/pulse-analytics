@@ -16,7 +16,7 @@ export default function SignInPage() {
       </Link>
       <SignIn
         signUpUrl="/sign-up"
-        fallbackRedirectUrl="/dashboard"
+        forceRedirectUrl="/onboarding"
         appearance={{ elements: { rootBox: "mx-auto" } }}
       />
     </div>

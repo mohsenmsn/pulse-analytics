@@ -5,9 +5,12 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { requireTenant } from "@/lib/auth";
 import { coerceRow } from "@/lib/utils";
+import { assertSafeExternalUrl } from "@/lib/url-safety";
 import type { DataRowPayload } from "@/types";
 
 const MAX_ROWS = 5000;
+const FETCH_TIMEOUT_MS = 10_000;
+const MAX_RESPONSE_BYTES = 2_000_000;
 
 function normalizeRows(rows: Record<string, unknown>[]): DataRowPayload[] {
   return rows
@@ -99,19 +102,37 @@ export async function createRestDataSource(input: {
     ? input.url
     : `${base}${input.url.startsWith("/") ? "" : "/"}${input.url}`;
 
+  let safeUrl: URL;
+  try {
+    safeUrl = await assertSafeExternalUrl(absoluteUrl);
+  } catch (err) {
+    return {
+      ok: false as const,
+      error: err instanceof Error ? err.message : "URL not allowed.",
+    };
+  }
+
   let payload: unknown;
   try {
-    const res = await fetch(absoluteUrl, {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    const res = await fetch(safeUrl.toString(), {
       headers: { Accept: "application/json" },
       cache: "no-store",
-    });
+      redirect: "error",
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timer));
     if (!res.ok) {
       return {
         ok: false as const,
         error: `Endpoint returned ${res.status}.`,
       };
     }
-    payload = await res.json();
+    const text = await res.text();
+    if (text.length > MAX_RESPONSE_BYTES) {
+      return { ok: false as const, error: "Response is too large." };
+    }
+    payload = JSON.parse(text) as unknown;
   } catch {
     return { ok: false as const, error: "Failed to fetch the endpoint." };
   }
@@ -140,7 +161,7 @@ export async function createRestDataSource(input: {
     organisationId: tenant.organisationId,
     name: input.name,
     type: "REST_API",
-    config: { url: absoluteUrl, dataPath: input.dataPath ?? null },
+    config: { url: safeUrl.toString(), dataPath: input.dataPath ?? null },
     rows,
   });
 

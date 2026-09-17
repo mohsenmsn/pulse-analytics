@@ -25,13 +25,17 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# local env files
+# local env files / secrets
 .env
-.env*.local
+.env.*
+!.env.example
 .tmp/
+.tmp/**
 
 # vercel
 .vercel
 
 # typescript
 *.tsbuildinfo
+
+.vercel

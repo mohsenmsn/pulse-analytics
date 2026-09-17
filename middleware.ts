@@ -5,6 +5,7 @@ const isPublicRoute = createRouteMatcher([
   "/",
   "/sign-in(.*)",
   "/sign-up(.*)",
+  "/access-restricted",
   "/api/webhooks(.*)",
   "/api/cron(.*)",
   "/api/mock(.*)",
@@ -15,12 +16,7 @@ export default clerkMiddleware((auth, request) => {
     auth().protect();
   }
 
-  // Expose the current pathname to server components (used by the app layout
-  // to decide whether to redirect to onboarding).
-  const requestHeaders = new Headers(request.headers);
-  requestHeaders.set("x-pathname", request.nextUrl.pathname);
-
-  return NextResponse.next({ request: { headers: requestHeaders } });
+  return NextResponse.next();
 });
 
 export const config = {

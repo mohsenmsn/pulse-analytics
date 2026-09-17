@@ -14,6 +14,8 @@ export function PulseClerkProvider({ children }: { children: React.ReactNode }) 
 
   return (
     <ClerkProvider
+      signInFallbackRedirectUrl="/onboarding"
+      signUpFallbackRedirectUrl="/onboarding"
       appearance={{
         variables: {
           colorPrimary: "#0d9488",

@@ -1,6 +1,7 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/db";
-import { slugify } from "@/lib/utils";
+import { getPlanLimits, slugify } from "@/lib/utils";
+import { isEmailAllowedUnderLockdown, isPortfolioLockdown } from "@/lib/portfolio";
 import type { TenantContext } from "@/types";
 import { redirect } from "next/navigation";
 
@@ -18,6 +19,11 @@ export async function ensureUser() {
     )?.emailAddress ??
     clerkUser.emailAddresses[0]?.emailAddress ??
     `${clerkId}@users.pulse.local`;
+
+  const existing = await prisma.user.findUnique({ where: { clerkId } });
+  if (!existing && isPortfolioLockdown() && !isEmailAllowedUnderLockdown(email)) {
+    redirect("/access-restricted");
+  }
 
   const name =
     [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(" ") ||
@@ -41,85 +47,108 @@ export async function ensureUser() {
 }
 
 export async function getTenantContext(): Promise<TenantContext | null> {
-  const { userId: clerkId, orgId } = await auth();
-  if (!clerkId) return null;
+  try {
+    const { userId: clerkId, orgId } = await auth();
+    if (!clerkId) return null;
 
-  const user = await ensureUser();
-  if (!user) return null;
+    const user = await ensureUser();
+    if (!user) return null;
 
-  let organisation = orgId
-    ? await prisma.organisation.findUnique({ where: { clerkOrgId: orgId } })
-    : null;
+    let organisation = orgId
+      ? await prisma.organisation.findUnique({ where: { clerkOrgId: orgId } })
+      : null;
 
-  if (!organisation) {
-    const membership = await prisma.membership.findFirst({
-      where: { userId: user.id },
-      include: { organisation: true },
-      orderBy: { createdAt: "asc" },
-    });
+    if (!organisation) {
+      const membership = await prisma.membership.findFirst({
+        where: { userId: user.id },
+        include: { organisation: true },
+        orderBy: { createdAt: "asc" },
+      });
 
-    if (membership) {
-      organisation = membership.organisation;
+      if (membership) {
+        organisation = membership.organisation;
+      } else {
+        const baseSlug = slugify(user.name || user.email.split("@")[0] || "org");
+        const slug = `${baseSlug}-${user.id.slice(-6)}`;
+        organisation = await prisma.organisation.create({
+          data: {
+            name: `${user.name || "My"} Workspace`,
+            slug,
+            clerkOrgId: orgId ?? undefined,
+            memberships: {
+              create: { userId: user.id, role: "OWNER" },
+            },
+            subscription: {
+              create: { plan: "FREE", status: "ACTIVE" },
+            },
+            dashboards: {
+              create: { name: "Main Dashboard" },
+            },
+          },
+        });
+      }
     } else {
-      const baseSlug = slugify(user.name || user.email.split("@")[0] || "org");
-      const slug = `${baseSlug}-${user.id.slice(-6)}`;
-      organisation = await prisma.organisation.create({
-        data: {
-          name: `${user.name || "My"} Workspace`,
-          slug,
-          memberships: {
-            create: { userId: user.id, role: "OWNER" },
-          },
-          subscription: {
-            create: { plan: "FREE", status: "ACTIVE" },
-          },
-          dashboards: {
-            create: { name: "Main Dashboard" },
+      const existingMembership = await prisma.membership.findUnique({
+        where: {
+          userId_organisationId: {
+            userId: user.id,
+            organisationId: organisation.id,
           },
         },
       });
+
+      if (!existingMembership) {
+        const [seatCount, subscription] = await Promise.all([
+          prisma.membership.count({
+            where: { organisationId: organisation.id },
+          }),
+          prisma.subscription.findUnique({
+            where: { organisationId: organisation.id },
+          }),
+        ]);
+        const maxSeats = getPlanLimits(subscription?.plan ?? "FREE").maxSeats;
+        if (Number.isFinite(maxSeats) && seatCount >= maxSeats) {
+          redirect("/billing?seats=full");
+        }
+
+        await prisma.membership.create({
+          data: {
+            userId: user.id,
+            organisationId: organisation.id,
+            role: "MEMBER",
+          },
+        });
+      }
     }
-  } else {
-    await prisma.membership.upsert({
+
+    const membership = await prisma.membership.findUnique({
       where: {
         userId_organisationId: {
           userId: user.id,
           organisationId: organisation.id,
         },
       },
-      update: {},
-      create: {
-        userId: user.id,
-        organisationId: organisation.id,
-        role: "MEMBER",
-      },
     });
+
+    const subscription = await prisma.subscription.findUnique({
+      where: { organisationId: organisation.id },
+    });
+
+    return {
+      userId: user.id,
+      clerkId: user.clerkId,
+      email: user.email,
+      organisationId: organisation.id,
+      organisationName: organisation.name,
+      organisationSlug: organisation.slug,
+      role: membership?.role ?? "MEMBER",
+      plan: subscription?.plan ?? "FREE",
+      onboardingDone: organisation.onboardingDone,
+    };
+  } catch (error) {
+    console.error("[getTenantContext]", error);
+    throw error;
   }
-
-  const membership = await prisma.membership.findUnique({
-    where: {
-      userId_organisationId: {
-        userId: user.id,
-        organisationId: organisation.id,
-      },
-    },
-  });
-
-  const subscription = await prisma.subscription.findUnique({
-    where: { organisationId: organisation.id },
-  });
-
-  return {
-    userId: user.id,
-    clerkId: user.clerkId,
-    email: user.email,
-    organisationId: organisation.id,
-    organisationName: organisation.name,
-    organisationSlug: organisation.slug,
-    role: membership?.role ?? "MEMBER",
-    plan: subscription?.plan ?? "FREE",
-    onboardingDone: organisation.onboardingDone,
-  };
 }
 
 export async function requireTenant(): Promise<TenantContext> {

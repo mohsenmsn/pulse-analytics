@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "crypto";
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
 import { prisma } from "@/lib/db";
@@ -28,11 +29,20 @@ function isBreached(
   }
 }
 
+function authorizeCron(authHeader: string | null, secret: string | undefined) {
+  if (!secret || !authHeader?.startsWith("Bearer ")) return false;
+  const provided = authHeader.slice("Bearer ".length);
+  const a = Buffer.from(provided);
+  const b = Buffer.from(secret);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
 export async function GET() {
   const authHeader = headers().get("authorization");
   const secret = process.env.CRON_SECRET;
 
-  if (!secret || authHeader !== `Bearer ${secret}`) {
+  if (!authorizeCron(authHeader, secret)) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 

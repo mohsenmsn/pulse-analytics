@@ -1,4 +1,4 @@
-import { PrismaClient, WidgetType } from "@prisma/client";
+import { PrismaClient, Prisma, WidgetType } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
@@ -169,7 +169,7 @@ async function main() {
           y: w.y,
           w: w.w,
           h: w.h,
-          config: w.config,
+          config: w.config as Prisma.InputJsonValue,
           dashboardId: dashboard.id,
           dataSourceId: dataSource.id,
         },

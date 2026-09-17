@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { OnboardingWizard } from "@/components/onboarding/onboarding-wizard";
 
 export const metadata: Metadata = { title: "Welcome" };
+export const dynamic = "force-dynamic";
 
 export default async function OnboardingPage() {
   const tenant = await requireTenant();
